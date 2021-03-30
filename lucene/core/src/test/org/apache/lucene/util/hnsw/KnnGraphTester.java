@@ -56,6 +56,7 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.FullKnn;
 import org.apache.lucene.util.IntroSorter;
 import org.apache.lucene.util.PrintStreamInfoStream;
 import org.apache.lucene.util.SuppressForbidden;
@@ -476,7 +477,9 @@ public class KnnGraphTester {
     if (Files.exists(nnPath)) {
       return readNN(nnPath);
     } else {
-      int[][] nn = computeNN(docPath, queryPath);
+      int[][] nn =
+          new FullKnn(dim, topK, SEARCH_STRATEGY, quiet)
+              .computeNN(docPath, queryPath, Runtime.getRuntime().availableProcessors());
       writeNN(nn, nnPath);
       return nn;
     }
