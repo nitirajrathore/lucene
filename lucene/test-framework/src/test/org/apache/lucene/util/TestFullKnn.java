@@ -183,4 +183,27 @@ public class TestFullKnn extends LuceneTestCase {
               new SimpleBufferProvider(floatArrayToByteBuffer(vec1)));
         });
   }
+
+  public void testLargeVectors() throws IOException {
+    int dim = 256;
+    int noOfVectors = 1_000;
+    int k = 3;
+    float[] vectors = VectorUtil.randomVector(random(), dim * noOfVectors);
+    final ByteBuffer byteBuffer = floatArrayToByteBuffer(vectors);
+
+    FullKnn full3nn = new FullKnn(dim, k, VectorValues.SearchStrategy.DOT_PRODUCT_HNSW, true);
+    final int[][] result =
+        full3nn.doFullKnn(
+            noOfVectors,
+            noOfVectors,
+            Runtime.getRuntime().availableProcessors(),
+            new SimpleBufferProvider(byteBuffer),
+            new SimpleBufferProvider(byteBuffer.duplicate()));
+
+    Assert.assertEquals("Result size did not match.", noOfVectors, result.length);
+    for (int i = 0; i < noOfVectors; i++) {
+      Assert.assertEquals("Did not return K results.", k, result[i].length);
+      Assert.assertEquals("First result was not the same vector.", i, result[i][0]);
+    }
+  }
 }
