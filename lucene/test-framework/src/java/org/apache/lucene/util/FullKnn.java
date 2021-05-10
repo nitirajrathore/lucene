@@ -35,10 +35,10 @@ public class FullKnn {
 
   private final int dim;
   private final int topK;
-  private final VectorValues.SearchStrategy searchStrategy;
+  private final VectorValues.SimilarityFunction searchStrategy;
   private final boolean quiet;
 
-  public FullKnn(int dim, int topK, VectorValues.SearchStrategy searchStrategy, boolean quiet) {
+  public FullKnn(int dim, int topK, VectorValues.SimilarityFunction searchStrategy, boolean quiet) {
     this.dim = dim;
     this.topK = topK;
     this.searchStrategy = searchStrategy;
