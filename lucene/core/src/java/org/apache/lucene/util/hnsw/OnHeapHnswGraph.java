@@ -19,17 +19,38 @@ package org.apache.lucene.util.hnsw;
 
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.Stack;
 import java.util.TreeMap;
+
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.RamUsageEstimator;
+
 
 /**
  * An {@link HnswGraph} where all nodes and connections are held in memory. This class is used to
  * construct the HNSW graph before it's written to the index.
  */
 public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
+  public Map<Integer, List<Event>> graphEvents = new HashMap<>();
+
+  public void addEvent(int eventKey, Event event) {
+    if (!graphEvents.containsKey(eventKey)) {
+      graphEvents.put(eventKey, new ArrayList<>());
+    }
+    graphEvents.get(eventKey).add(event);
+  }
+
+  public void clearEvents() {
+    graphEvents.clear();
+  }
 
   private int numLevels; // the current number of levels in the graph
   private int entryNode; // the current graph entry node on the top level. -1 if not set
@@ -94,6 +115,7 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
    * @param node the node to add, represented as an ordinal on the level 0.
    */
   public void addNode(int level, int node) {
+    addEvent(node, new Event(Event.Type.ADD, node, -1, level, ""));
     if (entryNode == -1) {
       entryNode = node;
     }
@@ -160,12 +182,38 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
   @Override
   public NodesIterator getNodesOnLevel(int level) {
     if (level == 0) {
+      // Since the zeroth level graph has nodes from 0 to size()-1 elements ALWAYS, there is no need to keep these
+      // values in
+      // nodes array, just the size is enough. The nodes == null cases is handled in all internal methods of
+      // ArrayNodesIterator
       return new ArrayNodesIterator(size());
     } else {
       return new CollectionNodesIterator(graphUpperLevels.get(level).keySet());
     }
   }
 
+  public static Set<Integer> findReacheable(OnHeapHnswGraph graph, int level) {
+    Set<Integer> visited = new HashSet<>();
+    Stack<Integer> candidates = new Stack<>();
+    candidates.push(graph.entryNode());
+
+    while (!candidates.isEmpty()) {
+      int node = candidates.pop();
+
+      if (visited.contains(node)) {
+        continue;
+      }
+
+      visited.add(node);
+      graph.seek(level, node);
+
+      int friendOrd;
+      while ((friendOrd = graph.nextNeighbor()) != NO_MORE_DOCS) {
+        candidates.push(friendOrd);
+      }
+    }
+    return visited;
+  }
   @Override
   public long ramBytesUsed() {
     long neighborArrayBytes0 =
@@ -203,5 +251,83 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
       }
     }
     return total;
+  }
+
+  public void printConnections(FileWriter fw) throws IOException {
+    int node = 0;
+    for (NeighborArray na : graphLevel0) {
+      fw.write(getNeighbourString(0, node, na.size()) + "\n");
+      node++;
+    }
+    for (int level = 1; level < numLevels; level++) {
+      int finalLevel = level;
+      graphUpperLevels.get(level).forEach((key, value) -> {
+        try {
+          fw.write(getNeighbourString(finalLevel, key, value.size()) + "\n");
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+      });
+    }
+  }
+
+  private String getNeighbourString(int level, int node, int count) {
+    return "level=" + level + ",node=" + node + ",count=" + count;
+  }
+
+  public Set<Integer> findUnReacheable(int level) {
+    Set<Integer> reachable = findReacheable(this, level);
+    if (level == 0) {
+      Set<Integer> unrechableNodes = new HashSet<>();
+      for (int i = 0; i < this.size(); i++) {
+        if (!reachable.contains(i)) {
+          unrechableNodes.add(i);
+        }
+      }
+      return unrechableNodes;
+    }
+    Set<Integer> nodes = new HashSet<Integer>(this.graphUpperLevels.get(level).keySet()); // total nodes
+    nodes.removeAll(reachable);
+    return nodes;
+  }
+
+  private static Set<Integer> getOverallReachableNodes(HnswGraph graph, int numLevels) throws IOException {
+    Set<Integer> visited = new HashSet<>();
+    Stack<Integer> candidates = new Stack<>();
+    candidates.push(graph.entryNode());
+
+    while (!candidates.isEmpty()) {
+      int node = candidates.pop();
+
+      if (visited.contains(node)) {
+        continue;
+      }
+
+      visited.add(node);
+      // emulate collapsing all the edges
+      for (int level = 0; level < numLevels; level++) {
+        try {
+          graph.seek(level, node); // run with -ea (Assertions enabled)
+          int friendOrd;
+          while ((friendOrd = graph.nextNeighbor()) != NO_MORE_DOCS) {
+            candidates.push(friendOrd);
+          }
+        } catch (AssertionError ae) { // TODO: seriously? Bad but have to do it for this test, as the API does not
+// throw error. You will get this error when the graph.seek() tries to seek a node which is not present in that level.
+        }
+      }
+    }
+    return visited;
+  }
+
+  public List<Integer> getOverAllDisconnectedNodes() throws IOException {
+    Set<Integer> reachable = getOverallReachableNodes(this, numLevels);
+    List<Integer> unrechableNodes = new ArrayList<>();
+    for (int i = 0; i < this.size(); i++) {
+      if (!reachable.contains(i)) {
+        unrechableNodes.add(i);
+      }
+    }
+    return unrechableNodes;
   }
 }
