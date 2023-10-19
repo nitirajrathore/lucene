@@ -21,7 +21,9 @@ import static java.lang.Math.log;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -203,41 +205,47 @@ public final class HnswGraphBuilder {
     }
   }
 
+
+
   /** Inserts a doc with vector value to the graph */
   public void addGraphNode(int node) throws IOException {
-    RandomVectorScorer scorer = scorerSupplier.scorer(node);
-    final int nodeLevel = getRandomGraphLevel(ml, random);
-    int curMaxLevel = hnsw.numLevels() - 1;
+    try {
+      RandomVectorScorer scorer = scorerSupplier.scorer(node);
+      final int nodeLevel = getRandomGraphLevel(ml, random);
+      int curMaxLevel = hnsw.numLevels() - 1;
 
-    // If entrynode is -1, then this should finish without adding neighbors
-    if (hnsw.entryNode() == -1) {
-      for (int level = nodeLevel; level >= 0; level--) {
+      // If entrynode is -1, then this should finish without adding neighbors
+      if (hnsw.entryNode() == -1) {
+        for (int level = nodeLevel; level >= 0; level--) {
+          hnsw.addNode(level, node);
+        }
+        return;
+      }
+      int[] eps = new int[]{hnsw.entryNode()};
+
+      // if a node introduces new levels to the graph, add this new node on new levels
+      for (int level = nodeLevel; level > curMaxLevel; level--) {
         hnsw.addNode(level, node);
       }
-      return;
-    }
-    int[] eps = new int[] {hnsw.entryNode()};
 
-    // if a node introduces new levels to the graph, add this new node on new levels
-    for (int level = nodeLevel; level > curMaxLevel; level--) {
-      hnsw.addNode(level, node);
-    }
-
-    // for levels > nodeLevel search with topk = 1
-    GraphBuilderKnnCollector candidates = entryCandidates;
-    for (int level = curMaxLevel; level > nodeLevel; level--) {
-      candidates.clear();
-      graphSearcher.searchLevel(candidates, scorer, level, eps, hnsw, null);
-      eps = new int[] {candidates.popNode()};
-    }
-    // for levels <= nodeLevel search with topk = beamWidth, and add connections
-    candidates = beamCandidates;
-    for (int level = Math.min(nodeLevel, curMaxLevel); level >= 0; level--) {
-      candidates.clear();
-      graphSearcher.searchLevel(candidates, scorer, level, eps, hnsw, null);
-      eps = candidates.popUntilNearestKNodes();
-      hnsw.addNode(level, node);
-      addDiverseNeighbors(level, node, candidates);
+      // for levels > nodeLevel search with topk = 1
+      GraphBuilderKnnCollector candidates = entryCandidates;
+      for (int level = curMaxLevel; level > nodeLevel; level--) {
+        candidates.clear();
+        graphSearcher.searchLevel(candidates, scorer, level, eps, hnsw, null);
+        eps = new int[]{candidates.popNode()};
+      }
+      // for levels <= nodeLevel search with topk = beamWidth, and add connections
+      candidates = beamCandidates;
+      for (int level = Math.min(nodeLevel, curMaxLevel); level >= 0; level--) {
+        candidates.clear();
+        graphSearcher.searchLevel(candidates, scorer, level, eps, hnsw, null);
+        eps = candidates.popUntilNearestKNodes();
+        hnsw.addNode(level, node);
+        addDiverseNeighbors(level, node, candidates);
+      }
+    }catch (Throwable t) {
+      hnsw.dumpGraph();
     }
   }
 
@@ -264,7 +272,7 @@ public final class HnswGraphBuilder {
     assert neighbors.size() == 0; // new node
     popToScratch(candidates);
     int maxConnOnLevel = level == 0 ? M * 2 : M;
-    selectAndLinkDiverse(neighbors, scratch, maxConnOnLevel);
+    selectAndLinkDiverse(node, level, neighbors, scratch, maxConnOnLevel);
 
     // Link the selected nodes to the new node, and the new node to the selected nodes (again
     // applying diversity heuristic)
@@ -273,26 +281,45 @@ public final class HnswGraphBuilder {
       int nbr = neighbors.node[i];
       NeighborArray nbrsOfNbr = hnsw.getNeighbors(level, nbr);
       nbrsOfNbr.addOutOfOrder(node, neighbors.score[i]);
+      hnsw.addEvent(node, new Event(Event.Type.CONNECT, nbr, node, level, "score=" + fmt(neighbors.score[i])));
+      hnsw.addEvent(nbr, new Event(Event.Type.CONNECT, nbr, node, level, "dup score=" + fmt(neighbors.score[i])));
       if (nbrsOfNbr.size() > maxConnOnLevel) {
         int indexToRemove = findWorstNonDiverse(nbrsOfNbr, nbr);
+        int nodeRemoved = nbrsOfNbr.node()[indexToRemove];
+        hnsw.addEvent(node, new Event(Event.Type.DISCONNECT, nbr, nodeRemoved, level,
+                "remove-non-diverse when adding " + nbr + " to " + node));
+        hnsw.addEvent(nodeRemoved, new Event(Event.Type.DISCONNECT, nbr, nodeRemoved,
+                level, "dup remove-non-diverse when adding " + nbr + " to " + node));
+        hnsw.addEvent(nbr, new Event(Event.Type.DISCONNECT, nbr, nodeRemoved,
+                level, "dup remove-non-diverse when adding " + nbr + " to " + node));
         nbrsOfNbr.removeIndex(indexToRemove);
       }
     }
   }
 
-  private void selectAndLinkDiverse(
+  private void selectAndLinkDiverse( int node, int level,
       NeighborArray neighbors, NeighborArray candidates, int maxConnOnLevel) throws IOException {
     // Select the best maxConnOnLevel neighbors of the new node, applying the diversity heuristic
+    // Nitiraj : We may end up adding very less number of nodes as neighbours
     for (int i = candidates.size() - 1; neighbors.size() < maxConnOnLevel && i >= 0; i--) {
       // compare each neighbor (in distance order) against the closer neighbors selected so far,
       // only adding it if it is closer to the target than to any of the other selected neighbors
       int cNode = candidates.node[i];
       float cScore = candidates.score[i];
       assert cNode < hnsw.size();
-      if (diversityCheck(cNode, cScore, neighbors)) {
+//      hnsw.addEvent(node, new Event(Event.Type.COMPARE, node, cNode, level, "score=" + fmt(cScore)));
+      if (diversityCheck(node, level, cNode, cScore, neighbors)) {
+        // because of this check. Can a node have significantly less number of connections? like 1 or 2 connections?
+        // and because of any reason those connections get removed then the graph can get disconnected easily
         neighbors.addInOrder(cNode, cScore);
+        hnsw.addEvent(node, new Event(Event.Type.CONNECT, node, cNode, level, "score=" + fmt(cScore)));
+        hnsw.addEvent(cNode, new Event(Event.Type.CONNECT, node, cNode, level, "dup score=" + fmt(cScore)));
       }
     }
+  }
+
+  public static String fmt(float f) {
+    return String.format("%.4f", f);
   }
 
   private void popToScratch(GraphBuilderKnnCollector candidates) {
@@ -313,11 +340,13 @@ public final class HnswGraphBuilder {
    * @param neighbors the neighbors selected so far
    * @return whether the candidate is diverse given the existing neighbors
    */
-  private boolean diversityCheck(int candidate, float score, NeighborArray neighbors)
+  private boolean diversityCheck(int node, int level, int candidate, float score, NeighborArray neighbors)
       throws IOException {
     RandomVectorScorer scorer = scorerSupplier.scorer(candidate);
     for (int i = 0; i < neighbors.size(); i++) {
       float neighborSimilarity = scorer.score(neighbors.node[i]);
+      hnsw.addEvent(node, new Event(Event.Type.COMPARE, candidate, neighbors.node[i], level,
+              "neighborSimilarity=" + fmt(neighborSimilarity) + ",  score=" + fmt(score)));
       if (neighborSimilarity >= score) {
         return false;
       }
@@ -331,13 +360,15 @@ public final class HnswGraphBuilder {
    */
   private int findWorstNonDiverse(NeighborArray neighbors, int nodeOrd) throws IOException {
     RandomVectorScorer scorer = scorerSupplier.scorer(nodeOrd);
-    int[] uncheckedIndexes = neighbors.sort(scorer);
+    int[] uncheckedIndexes = neighbors.sort(scorer); // what does 'unchecked node' means? What check? What
+    // does sort return???
     if (uncheckedIndexes == null) {
       // all nodes are checked, we will directly return the most distant one
       return neighbors.size() - 1;
     }
     int uncheckedCursor = uncheckedIndexes.length - 1;
-    for (int i = neighbors.size() - 1; i > 0; i--) {
+    for (int i = neighbors.size() - 1; i > 0; i--) {   // why iterate till only i>0 and not till i>=0. May to
+      // keep atleast 1 node connected?
       if (uncheckedCursor < 0) {
         // no unchecked node left
         break;

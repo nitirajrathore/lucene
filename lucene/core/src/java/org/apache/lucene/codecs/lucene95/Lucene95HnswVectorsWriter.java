@@ -20,15 +20,20 @@ package org.apache.lucene.codecs.lucene95;
 import static org.apache.lucene.codecs.lucene95.Lucene95HnswVectorsFormat.DIRECT_MONOTONIC_BLOCK_SHIFT;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.HnswGraphProvider;
 import org.apache.lucene.codecs.KnnFieldVectorsWriter;
@@ -661,6 +666,7 @@ public final class Lucene95HnswVectorsWriter extends KnnVectorsWriter {
    * @throws IOException if writing to vectorIndex fails
    */
   private int[][] writeGraph(OnHeapHnswGraph graph) throws IOException {
+    writeStatistics(graph);
     if (graph == null) return new int[0][0];
     // write vectors' neighbours on each level into the vectorIndex file
     int countOnLevel0 = graph.size();
@@ -701,6 +707,47 @@ public final class Lucene95HnswVectorsWriter extends KnnVectorsWriter {
     }
     Arrays.sort(sortedNodes);
     return sortedNodes;
+  }
+
+  public static String LOGS_PATH = System.getProperty("user.home") + "/sims/disconnected";
+
+  private void writeStatistics(OnHeapHnswGraph hnsw) throws IOException {
+//    infoStream.message(
+//            "IW","now abc1 printing to " + LOGS_PATH);
+    hnsw.dumpGraph();
+    hnsw.dumpEvents();
+
+    printTotalNodeConnectionsAtEachLevel(hnsw, hnsw.getDumpFolder());
+    FileWriter fw = new FileWriter(hnsw.getDumpFolder() + "/" + "events.csv");
+    System.out.println("Now abc1 writing to file" + fw);
+    Set<Integer> unrechableAll = new HashSet<>();
+    for (int level = 0; level < hnsw.numLevels(); level++) {
+      unrechableAll.addAll(hnsw.findUnReacheable(level));
+    }
+    hnsw.printEventOfDisconnectedNodes(unrechableAll, fw);
+    fw.close();
+
+    List<Integer> disconnected = hnsw.getOverAllDisconnectedNodes();
+    FileWriter fileWriter = new FileWriter(hnsw.getDumpFolder()
+            + "/" + "full_disconnected_nodes.txt");
+    System.out.println("Now abc1 writing to file" + fileWriter);
+    disconnected.forEach(d -> {
+      try {
+        fileWriter.write(d + "\n");
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    });
+
+    fileWriter.close();
+
+    hnsw.clearEvents();
+  }
+
+  private void printTotalNodeConnectionsAtEachLevel(OnHeapHnswGraph hnsw, String folerPath) throws IOException {
+    FileWriter fw = new FileWriter(folerPath + "/" + "node_counts.csv");
+    hnsw.printConnectionCount(fw);
+    fw.close();
   }
 
   private void writeMeta(
