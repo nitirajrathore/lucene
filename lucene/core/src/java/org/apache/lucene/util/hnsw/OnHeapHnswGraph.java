@@ -164,6 +164,10 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
       return cur.node[++upto];
     }
      */
+    if (cur.sortedNodeSize != cur.size) {
+      System.out.println("neighbours for current node are not sorted. sorted_size=  " + cur.sortedNodeSize + ", size=" + cur.size);
+    }
+//    assert cur.sortedNodeSize == cur.size;
     if (++upto < cur.size()) {
       return cur.node[upto];
     }
@@ -218,7 +222,7 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
       dumpNeighbours(fw, 0, i, graphLevel0.get(i));
     }
     for (int level = 1; level < this.numLevels(); level++) {
-      TreeMap<Integer, NeighborArray> levelGraph = graphUpperLevels.get(level);
+      Map<Integer, NeighborArray> levelGraph = graphUpperLevels.get(level);
       for (int i : levelGraph.keySet()) {
         dumpNeighbours(fw, level, i, levelGraph.get(i));
       }

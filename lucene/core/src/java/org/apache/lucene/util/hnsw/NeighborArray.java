@@ -31,10 +31,10 @@ import org.apache.lucene.util.ArrayUtil;
  */
 public class NeighborArray {
   private final boolean scoresDescOrder;
-  private int size;
+  int size;
   float[] score;
   int[] node;
-  private int sortedNodeSize;
+  int sortedNodeSize;
 
   public NeighborArray(int maxSize, boolean descOrder) {
     node = new int[maxSize];

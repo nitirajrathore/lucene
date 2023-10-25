@@ -361,6 +361,7 @@ public final class HnswGraphBuilder {
   private int findWorstNonDiverse(NeighborArray neighbors, int nodeOrd) throws IOException {
     RandomVectorScorer scorer = scorerSupplier.scorer(nodeOrd);
     int[] uncheckedIndexes = neighbors.sort(scorer); // what does 'unchecked node' means? What check? What
+    System.out.println("findWorstNonDiverse: uncheckedIndexes.length = " + uncheckedIndexes.length);
     // does sort return???
     if (uncheckedIndexes == null) {
       // all nodes are checked, we will directly return the most distant one
