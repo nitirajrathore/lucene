@@ -131,6 +131,13 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
 
   @Override
   public int nextNeighbor() {
+    // Although ++upto is not harmful in a way that it will not hit int_max easily, but it should be better if we first
+    // check and then increment like below
+    /*
+        if (upto + 1 < cur.size()) {
+      return cur.node[++upto];
+    }
+     */
     if (++upto < cur.size()) {
       return cur.node[upto];
     }
@@ -161,6 +168,10 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
   @Override
   public NodesIterator getNodesOnLevel(int level) {
     if (level == 0) {
+      // Since the zeroth level graph has nodes from 0 to size()-1 elements ALWAYS, there is no need to keep these
+      // values in
+      // nodes array, just the size is enough. The nodes == null cases is handled in all internal methods of
+      // ArrayNodesIterator
       return new ArrayNodesIterator(size());
     } else {
       return new CollectionNodesIterator(graphUpperLevels.get(level).keySet());

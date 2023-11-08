@@ -203,4 +203,22 @@ public class NeighborArray {
     }
     return start;
   }
+
+  public void removeNode(int nodeId) {
+//    System.out.println("size = " + this.size() + " node.length = " + node.length);
+    int indexToRemove = -1;
+    for (int i = 0; i < this.size(); i++) {
+      if (node[i] == nodeId) {
+        indexToRemove = i;
+        break;
+      }
+    }
+
+//    assert indexToRemove != -1;
+    if (indexToRemove == -1) {
+      System.out.println("ERRORR1 : did not find nodeId = " + nodeId );
+      throw new IllegalStateException("Did not find the nodeId : " + nodeId);
+    }
+    removeIndex(indexToRemove);
+  }
 }

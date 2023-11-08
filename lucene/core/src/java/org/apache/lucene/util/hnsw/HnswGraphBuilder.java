@@ -21,12 +21,7 @@ import static java.lang.Math.log;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.SplittableRandom;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.TopDocs;
@@ -269,30 +264,43 @@ public final class HnswGraphBuilder {
     // Link the selected nodes to the new node, and the new node to the selected nodes (again
     // applying diversity heuristic)
     int size = neighbors.size();
+    List<Integer> removeLater = new ArrayList<>();
     for (int i = 0; i < size; i++) {
       int nbr = neighbors.node[i];
       NeighborArray nbrsOfNbr = hnsw.getNeighbors(level, nbr);
       nbrsOfNbr.addOutOfOrder(node, neighbors.score[i]);
       if (nbrsOfNbr.size() > maxConnOnLevel) {
-        int indexToRemove = findWorstNonDiverse(nbrsOfNbr, nbr);
-        nbrsOfNbr.removeIndex(indexToRemove);
+        int indexToRemove = findWorstNonDiverse(nbrsOfNbr, nbr, level);
+        if (indexToRemove != -1) {
+          int nodeRemoved = nbrsOfNbr.node()[indexToRemove];
+          nbrsOfNbr.removeIndex(indexToRemove);
+          if (nodeRemoved == node) {
+            // This still has potential to generate disconnected nodes as the `findWorstNonDiverse()` will receive incorrect number of node count for current node.
+            removeLater.add(nbr);
+          } else {
+            removeOtherHalf(nodeRemoved, nbr, level);
+          }
+        }
       }
+    }
+
+    for (int toBeRemoved : removeLater) {
+      removeOtherHalf(node, toBeRemoved, level);
     }
   }
 
-  private void selectAndLinkDiverse(
-      NeighborArray neighbors, NeighborArray candidates, int maxConnOnLevel) throws IOException {
-    // Select the best maxConnOnLevel neighbors of the new node, applying the diversity heuristic
+  private void selectAndLinkDiverse( NeighborArray neighbors, NeighborArray candidates, int maxConnOnLevel) {
     for (int i = candidates.size() - 1; neighbors.size() < maxConnOnLevel && i >= 0; i--) {
-      // compare each neighbor (in distance order) against the closer neighbors selected so far,
-      // only adding it if it is closer to the target than to any of the other selected neighbors
       int cNode = candidates.node[i];
       float cScore = candidates.score[i];
       assert cNode < hnsw.size();
-      if (diversityCheck(cNode, cScore, neighbors)) {
         neighbors.addInOrder(cNode, cScore);
-      }
     }
+  }
+
+  private void removeOtherHalf(int fromNode, int nbr, int level) {
+    NeighborArray neighbors = hnsw.getNeighbors(level, fromNode);
+    neighbors.removeNode(nbr);
   }
 
   private void popToScratch(GraphBuilderKnnCollector candidates) {
@@ -329,27 +337,60 @@ public final class HnswGraphBuilder {
    * Find first non-diverse neighbour among the list of neighbors starting from the most distant
    * neighbours
    */
-  private int findWorstNonDiverse(NeighborArray neighbors, int nodeOrd) throws IOException {
+  private int findWorstNonDiverse(NeighborArray neighbors, int nodeOrd, int level) throws IOException {
     RandomVectorScorer scorer = scorerSupplier.scorer(nodeOrd);
-    int[] uncheckedIndexes = neighbors.sort(scorer);
-    if (uncheckedIndexes == null) {
-      // all nodes are checked, we will directly return the most distant one
-      return neighbors.size() - 1;
+    int[] uncheckedIndexes = neighbors.sort(scorer); // Sort may not be required now.
+    int maxCommonConnectionCount = 0;
+    int maxcccIndex = -1;
+    int maxConnectionIndex = -1;
+    int maxConnectionCount = 2; // has atleast 2 connections
+    for (int i = neighbors.size() - 1; i >= 0 ; i--) {
+      int currNode = neighbors.node[i];
+      NeighborArray currNodeNeighbours = hnsw.getNeighbors(level, currNode);
+      // TODO: commonNeighbours can contain the scores from other node.
+      NeighborArray commonNeighbours = findCommon(neighbors, currNodeNeighbours);
+
+      if (commonNeighbours.size() > maxCommonConnectionCount) {
+        maxCommonConnectionCount = commonNeighbours.size();
+        maxcccIndex = i;
+      }
+      if (currNodeNeighbours.size() > maxConnectionCount) {
+        maxConnectionCount = currNodeNeighbours.size();
+        maxConnectionIndex = i;
+      }
+      // finding scores may not be required if stored in NeighbourArray
+      RandomVectorScorer neighbourScorers = scorerSupplier.scorer(currNode);
+      for (int j = 0; j < commonNeighbours.size(); j++) {
+        float neighbourScore = neighbourScorers.score(commonNeighbours.node[j]);
+        if (neighbourScore > neighbors.score[i]) {
+          return i;
+        }
+      }
     }
-    int uncheckedCursor = uncheckedIndexes.length - 1;
-    for (int i = neighbors.size() - 1; i > 0; i--) {
-      if (uncheckedCursor < 0) {
-        // no unchecked node left
-        break;
-      }
-      if (isWorstNonDiverse(i, neighbors, uncheckedIndexes, uncheckedCursor)) {
-        return i;
-      }
-      if (i == uncheckedIndexes[uncheckedCursor]) {
-        uncheckedCursor--;
+    if (maxcccIndex != -1) {
+      return maxcccIndex;
+    } else if (maxConnectionIndex != -1) {
+      return maxConnectionIndex;
+    } else {
+      return -1;
+    }
+  }
+
+  private NeighborArray findCommon(NeighborArray neighbors, NeighborArray currNodeNeighbours) {
+    // Can keep Set in NeighborArray to avoid double for loop here?
+    // or atleast single for loop with a set.
+    // if we keep sorted in NeighborArray may be we can do it without a Set too.
+    NeighborArray common = new NeighborArray(Math.max(currNodeNeighbours.size(), neighbors.size()), true);
+    for (int i = 0; i < neighbors.size(); i++) {
+      for (int j = 0; j < currNodeNeighbours.size(); j++) {
+        if (neighbors.node[i] == currNodeNeighbours.node[j]) {
+          // TODO: Store the scores instead of adding 1 here.
+          common.addOutOfOrder(neighbors.node[i], 1);
+        }
       }
     }
-    return neighbors.size() - 1;
+
+    return common;
   }
 
   private boolean isWorstNonDiverse(
