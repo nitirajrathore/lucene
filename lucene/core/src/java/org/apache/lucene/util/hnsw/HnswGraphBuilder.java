@@ -337,9 +337,7 @@ public final class HnswGraphBuilder {
    * Find first non-diverse neighbour among the list of neighbors starting from the most distant
    * neighbours
    */
-  private int findWorstNonDiverse(NeighborArray neighbors, int nodeOrd, int level) throws IOException {
-    RandomVectorScorer scorer = scorerSupplier.scorer(nodeOrd);
-    int[] uncheckedIndexes = neighbors.sort(scorer); // Sort may not be required now.
+  private int findWorstNonDiverse(NeighborArray neighbors, int nodeOrd, int level) {
     int maxCommonConnectionCount = 0;
     int maxcccIndex = -1;
     int maxConnectionIndex = -1;
@@ -347,8 +345,7 @@ public final class HnswGraphBuilder {
     for (int i = neighbors.size() - 1; i >= 0 ; i--) {
       int currNode = neighbors.node[i];
       NeighborArray currNodeNeighbours = hnsw.getNeighbors(level, currNode);
-      // TODO: commonNeighbours can contain the scores from other node.
-      NeighborArray commonNeighbours = findCommon(neighbors, currNodeNeighbours);
+      NeighborArray commonNeighbours = findCommonBruteforce(neighbors, currNodeNeighbours);
 
       if (commonNeighbours.size() > maxCommonConnectionCount) {
         maxCommonConnectionCount = commonNeighbours.size();
@@ -358,11 +355,8 @@ public final class HnswGraphBuilder {
         maxConnectionCount = currNodeNeighbours.size();
         maxConnectionIndex = i;
       }
-      // finding scores may not be required if stored in NeighbourArray
-      RandomVectorScorer neighbourScorers = scorerSupplier.scorer(currNode);
       for (int j = 0; j < commonNeighbours.size(); j++) {
-        float neighbourScore = neighbourScorers.score(commonNeighbours.node[j]);
-        if (neighbourScore > neighbors.score[i]) {
+        if (commonNeighbours.score[j] > neighbors.score[i]) {
           return i;
         }
       }
@@ -377,15 +371,31 @@ public final class HnswGraphBuilder {
   }
 
   private NeighborArray findCommon(NeighborArray neighbors, NeighborArray currNodeNeighbours) {
-    // Can keep Set in NeighborArray to avoid double for loop here?
-    // or atleast single for loop with a set.
-    // if we keep sorted in NeighborArray may be we can do it without a Set too.
     NeighborArray common = new NeighborArray(Math.max(currNodeNeighbours.size(), neighbors.size()), true);
-    for (int i = 0; i < neighbors.size(); i++) {
-      for (int j = 0; j < currNodeNeighbours.size(); j++) {
-        if (neighbors.node[i] == currNodeNeighbours.node[j]) {
-          // TODO: Store the scores instead of adding 1 here.
-          common.addOutOfOrder(neighbors.node[i], 1);
+    // assuming nodes are sorted by their nodeId and not by their scores
+    int a = 0;
+    int b = 0;
+
+    while (a < neighbors.size() && b < currNodeNeighbours.size()) {
+      if (neighbors.node[a] == currNodeNeighbours.node[b]) {
+        common.addOutOfOrder(currNodeNeighbours.node[b], currNodeNeighbours.score[b]);
+        a++;
+        b++;
+      } else if (neighbors.node[a] > currNodeNeighbours.node[b]) {
+        b++;
+      } else {
+        a++;
+      }
+    }
+    return common;
+  }
+  private NeighborArray findCommonBruteforce(NeighborArray neighbors, NeighborArray currNodeNeighbours) {
+    // assumes node un-sorted
+    NeighborArray common = new NeighborArray(Math.max(currNodeNeighbours.size(), neighbors.size()), true);
+    for (int a = 0; a < neighbors.size(); a++) {
+      for (int b = 0; b < currNodeNeighbours.size(); b++) {
+        if (neighbors.node[a] == currNodeNeighbours.node[b]) {
+          common.addOutOfOrder(currNodeNeighbours.node[b], currNodeNeighbours.score[b]);
         }
       }
     }
