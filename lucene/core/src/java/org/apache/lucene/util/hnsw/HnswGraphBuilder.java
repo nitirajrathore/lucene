@@ -345,7 +345,7 @@ public final class HnswGraphBuilder {
     for (int i = neighbors.size() - 1; i >= 0 ; i--) {
       int currNode = neighbors.node[i];
       NeighborArray currNodeNeighbours = hnsw.getNeighbors(level, currNode);
-      NeighborArray commonNeighbours = findCommonBruteforce(neighbors, currNodeNeighbours);
+      NeighborArray commonNeighbours = findCommonSet(neighbors, currNodeNeighbours);
 
       if (commonNeighbours.size() > maxCommonConnectionCount) {
         maxCommonConnectionCount = commonNeighbours.size();
@@ -370,6 +370,20 @@ public final class HnswGraphBuilder {
     }
   }
 
+  private NeighborArray findCommonSet(NeighborArray neighbors, NeighborArray currNodeNeighbours) {
+    NeighborArray common = new NeighborArray(Math.max(currNodeNeighbours.size(), neighbors.size()), true);
+    HashSet<Integer> aNodes = new HashSet<>(neighbors.size());
+    for (int i = 0; i < neighbors.size(); i++) {
+      aNodes.add(neighbors.node[i]);
+    }
+
+    for (int i = 0; i < currNodeNeighbours.size(); i++) {
+      if (aNodes.contains(currNodeNeighbours.node[i])) {
+        common.addOutOfOrder(currNodeNeighbours.node[i], currNodeNeighbours.score[i]);
+      }
+    }
+    return common;
+  }
   private NeighborArray findCommon(NeighborArray neighbors, NeighborArray currNodeNeighbours) {
     NeighborArray common = new NeighborArray(Math.max(currNodeNeighbours.size(), neighbors.size()), true);
     // assuming nodes are sorted by their nodeId and not by their scores
