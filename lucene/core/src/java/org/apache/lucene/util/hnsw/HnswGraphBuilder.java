@@ -346,7 +346,7 @@ public final class HnswGraphBuilder {
     for (int i = neighbors.size() - 1; i >= 0 ; i--) {
       int currNode = neighbors.node[i];
       NeighborArray currNodeNeighbours = hnsw.getNeighbors(level, currNode);
-      NeighborArray commonNeighbours = findCommonIntMap(neighbors, currNodeNeighbours);
+      NeighborArray commonNeighbours = findCommonBruteforce(neighbors, currNodeNeighbours);
 
       if (commonNeighbours.size() > maxCommonConnectionCount) {
         maxCommonConnectionCount = commonNeighbours.size();
