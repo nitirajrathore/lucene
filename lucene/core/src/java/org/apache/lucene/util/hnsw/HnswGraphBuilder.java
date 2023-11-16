@@ -27,6 +27,7 @@ import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.InfoStream;
+import org.apache.lucene.util.hppc.IntIntHashMap;
 
 /**
  * Builder for HNSW graph. See {@link HnswGraph} for a gloss on the algorithm and the meaning of the
@@ -345,7 +346,7 @@ public final class HnswGraphBuilder {
     for (int i = neighbors.size() - 1; i >= 0 ; i--) {
       int currNode = neighbors.node[i];
       NeighborArray currNodeNeighbours = hnsw.getNeighbors(level, currNode);
-      NeighborArray commonNeighbours = findCommonSet(neighbors, currNodeNeighbours);
+      NeighborArray commonNeighbours = findCommonIntMap(neighbors, currNodeNeighbours);
 
       if (commonNeighbours.size() > maxCommonConnectionCount) {
         maxCommonConnectionCount = commonNeighbours.size();
@@ -379,6 +380,20 @@ public final class HnswGraphBuilder {
 
     for (int i = 0; i < currNodeNeighbours.size(); i++) {
       if (aNodes.contains(currNodeNeighbours.node[i])) {
+        common.addOutOfOrder(currNodeNeighbours.node[i], currNodeNeighbours.score[i]);
+      }
+    }
+    return common;
+  }
+  private NeighborArray findCommonIntMap(NeighborArray neighbors, NeighborArray currNodeNeighbours) {
+    NeighborArray common = new NeighborArray(Math.max(currNodeNeighbours.size(), neighbors.size()), true);
+    IntIntHashMap aNodes = new IntIntHashMap(neighbors.size());
+    for (int i = 0; i < neighbors.size(); i++) {
+      aNodes.put(neighbors.node[i], 0);
+    }
+
+    for (int i = 0; i < currNodeNeighbours.size(); i++) {
+      if (aNodes.containsKey(currNodeNeighbours.node[i])) {
         common.addOutOfOrder(currNodeNeighbours.node[i], currNodeNeighbours.score[i]);
       }
     }
