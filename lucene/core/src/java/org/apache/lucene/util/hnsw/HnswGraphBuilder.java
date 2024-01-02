@@ -252,8 +252,8 @@ public class HnswGraphBuilder implements HnswBuilder {
 
       // then do connections from bottom up
       for (int i = 0; i < scratchPerLevel.length; i++) {
-        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i]); // baseline : similar to false, false, false below.
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false, false);
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i]); // baseline : similar to false, false, false below.
+        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false, false); // baseline_equivalent
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false, false);
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, false);
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, true);
@@ -296,7 +296,7 @@ public class HnswGraphBuilder implements HnswBuilder {
     return now;
   }
 
-  private boolean[] addDiverseNeighbors(int level, int node, NeighborArray candidates,
+  private void addDiverseNeighbors(int level, int node, NeighborArray candidates,
                                         boolean extendCandidates, boolean keepPrunedConnections, boolean keepHalfPrunedConnection) throws IOException {
     NeighborArray neighbors = hnsw.getNeighbors(level, node);
     assert neighbors.size() == 0; // new node
@@ -333,7 +333,24 @@ public class HnswGraphBuilder implements HnswBuilder {
       neighbors.sort(scorer);
     }
 
-    return selected;
+    // Link the selected nodes to the new node, and the new node to the selected nodes (again
+    // applying diversity heuristic)
+    // NOTE: here we're using candidates and mask but not the neighbour array because once we have
+    // added incoming link there will be possibilities of this node being discovered and neighbour
+    // array being modified. So using local candidates and mask is a safer option.
+    for (int i = 0; i < candidates.size(); i++) {
+      if (selected[i] == false) {
+        continue;
+      }
+      int nbr = candidates.nodes()[i];
+      NeighborArray nbrsOfNbr = hnsw.getNeighbors(level, nbr);
+      nbrsOfNbr.rwlock.writeLock().lock();
+      try {
+        nbrsOfNbr.addAndEnsureDiversity(node, candidates.scores()[i], nbr, scorerSupplier);
+      } finally {
+        nbrsOfNbr.rwlock.writeLock().unlock();
+      }
+    }
   }
 
   /**
