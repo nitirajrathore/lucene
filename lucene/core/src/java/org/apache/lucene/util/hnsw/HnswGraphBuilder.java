@@ -255,10 +255,10 @@ public class HnswGraphBuilder implements HnswBuilder {
       for (int i = 0; i < scratchPerLevel.length; i++) {
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i]); // baseline : similar to false, false, false below.
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false, false); // baseline_equivalent
-        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false, false); // with extendCandidates = true
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false, false); // exp-1 extendCandidates = true
+        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, false); // exp-2 with keep-pruned =true
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, false);
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, true);
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, false);
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, true);
       }
       lowestUnsetLevel += scratchPerLevel.length;
