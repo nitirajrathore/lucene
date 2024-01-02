@@ -32,6 +32,7 @@ import org.apache.lucene.util.ArrayUtil;
  * @lucene.internal
  */
 public class NeighborArray {
+
   private final boolean scoresDescOrder;
   private int size;
   private final float[] scores;
@@ -45,6 +46,13 @@ public class NeighborArray {
     this.scoresDescOrder = descOrder;
   }
 
+  public boolean isScoresDescOrder() {
+    return scoresDescOrder;
+  }
+
+  public int getMaxSize() {
+    return nodes.length;
+  }
   /**
    * Add a new node to the NeighborArray. The new node must be worse than all previously stored
    * nodes. This cannot be called after {@link #addOutOfOrder(int, float)}

@@ -252,7 +252,13 @@ public class HnswGraphBuilder implements HnswBuilder {
 
       // then do connections from bottom up
       for (int i = 0; i < scratchPerLevel.length; i++) {
-        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i]);
+        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i]); // baseline : similar to false, false, false below.
+        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false, false);
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false, false);
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, false);
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, true);
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, false);
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, true);
       }
       lowestUnsetLevel += scratchPerLevel.length;
       assert lowestUnsetLevel == Math.min(nodeLevel, curMaxLevel) + 1;
@@ -288,6 +294,60 @@ public class HnswGraphBuilder implements HnswBuilder {
             TimeUnit.NANOSECONDS.toMillis(now - t),
             TimeUnit.NANOSECONDS.toMillis(now - start)));
     return now;
+  }
+
+  private boolean[] addDiverseNeighbors(int level, int node, NeighborArray candidates,
+                                        boolean extendCandidates, boolean keepPrunedConnections, boolean keepHalfPrunedConnection) throws IOException {
+    NeighborArray neighbors = hnsw.getNeighbors(level, node);
+    assert neighbors.size() == 0; // new node
+
+    int maxConnOnLevel = level == 0 ? M * 2 : M;
+    NeighborArray originalCandidates = candidates;
+    RandomVectorScorer scorer = scorerSupplier.scorer(node);
+    if (extendCandidates) {
+      candidates = new NeighborArray(originalCandidates.size() * maxConnOnLevel, originalCandidates.isScoresDescOrder());
+      for (int i = 0; i < originalCandidates.size(); i++) {
+        candidates.addOutOfOrder(originalCandidates.nodes()[i], originalCandidates.scores()[i]);
+        allAllNeighbours(originalCandidates.nodes()[i], level, candidates);
+      }
+
+      candidates.sort(scorer);
+    }
+
+
+    boolean[] selected = selectAndLinkDiverse(neighbors, candidates, maxConnOnLevel);
+
+    if (keepPrunedConnections) {
+      int maskedIndex = selected.length - 1; // start from end as the highest scoring candidates are at the end
+      int maxConn = maxConnOnLevel;
+      if (keepHalfPrunedConnection) {
+        maxConn = maxConnOnLevel/2;
+      }
+      while (neighbors.size() < maxConn && maskedIndex >= 0) {
+        if (selected[maskedIndex] == false) {
+          neighbors.addOutOfOrder(candidates.nodes()[maskedIndex], candidates.scores()[maskedIndex]);
+          selected[maskedIndex] = true;
+        }
+        maskedIndex--;
+      }
+      neighbors.sort(scorer);
+    }
+
+    return selected;
+  }
+
+  /**
+   * Adds all neighbours of `node` into the `candidate` array in out of order with Float.Nan score
+   * @param node
+   * @param candidates
+   */
+  private void allAllNeighbours(int node, int level, NeighborArray candidates) {
+    NeighborArray neighbors = hnsw.getNeighbors(level, node);
+
+    // TODO: I think we need to guard with lock here as the `neighbors` array might get modified while we are iterating.
+    for (int i = 0; i < neighbors.size() && candidates.size() < candidates.getMaxSize(); i++) {
+      candidates.addOutOfOrder(neighbors.nodes()[i], Float.NaN);
+    }
   }
 
   private void addDiverseNeighbors(int level, int node, NeighborArray candidates)
@@ -327,7 +387,7 @@ public class HnswGraphBuilder implements HnswBuilder {
    */
   private boolean[] selectAndLinkDiverse(
       NeighborArray neighbors, NeighborArray candidates, int maxConnOnLevel) throws IOException {
-    boolean[] mask = new boolean[candidates.size()];
+    boolean[] selected = new boolean[candidates.size()];
     // Select the best maxConnOnLevel neighbors of the new node, applying the diversity heuristic
     for (int i = candidates.size() - 1; neighbors.size() < maxConnOnLevel && i >= 0; i--) {
       // compare each neighbor (in distance order) against the closer neighbors selected so far,
@@ -336,13 +396,13 @@ public class HnswGraphBuilder implements HnswBuilder {
       float cScore = candidates.scores()[i];
       assert cNode <= hnsw.maxNodeId();
       if (diversityCheck(cNode, cScore, neighbors)) {
-        mask[i] = true;
+        selected[i] = true;
         // here we don't need to lock, because there's no incoming link so no others is able to
         // discover this node such that no others will modify this neighbor array as well
         neighbors.addInOrder(cNode, cScore);
       }
     }
-    return mask;
+    return selected;
   }
 
   private static void popToScratch(GraphBuilderKnnCollector candidates, NeighborArray scratch) {
