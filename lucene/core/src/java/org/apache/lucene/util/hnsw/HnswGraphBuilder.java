@@ -259,8 +259,8 @@ public class HnswGraphBuilder implements HnswBuilder {
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, true);
 
         // new heuristic
-        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], false); // new heuristic
-//        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], true); // new heuristic
+//        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], false); // new heuristic
+        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], true); // new heuristic
       }
       lowestUnsetLevel += scratchPerLevel.length;
       assert lowestUnsetLevel == Math.min(nodeLevel, curMaxLevel) + 1;
