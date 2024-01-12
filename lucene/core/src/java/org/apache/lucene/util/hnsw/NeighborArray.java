@@ -88,6 +88,7 @@ public class NeighborArray {
     size++;
   }
 
+
   /**
    * In addition to {@link #addOutOfOrder(int, float)}, this function will also remove the
    * least-diverse node if the node array is full after insertion
@@ -298,4 +299,24 @@ public class NeighborArray {
     }
     return false;
   }
+
+  public void removeNode(int nodeId) {
+//    System.out.println("size = " + this.size() + " node.length = " + node.length);
+    int indexToRemove = -1;
+    for (int i = 0; i < this.size(); i++) {
+      if (nodes[i] == nodeId) {
+        indexToRemove = i;
+        break;
+      }
+    }
+
+//    assert indexToRemove != -1;
+    if (indexToRemove == -1) {
+      System.out.println("ERRORR1 : did not find nodeId = " + nodeId );
+      throw new IllegalStateException("Did not find the nodeId : " + nodeId);
+    } else {
+      removeIndex(indexToRemove);
+    }
+  }
+
 }
