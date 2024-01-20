@@ -256,13 +256,14 @@ public class HnswGraphBuilder implements HnswBuilder {
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false, false, false); // exp-1 extendCandidates = true
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, false, false); // exp-2 with keep-pruned =true
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, true, false); // exp-3 with keep pruned till half max-conn
-        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, true, true); // exp-3 with keep pruned till half max-conn and remove other half
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, true, true); // exp-3 with keep pruned till half max-conn and remove other half
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, false, false);
 //        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, true, false);
 
         // new heuristic
-//        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], false); // new heuristic
-//        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], true); // new heuristic
+//        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false); // new heuristic without remove other half
+//        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false); // new heuristic with remove other half
+        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true); // new heuristic with honour-max-conn true
       }
       lowestUnsetLevel += scratchPerLevel.length;
       assert lowestUnsetLevel == Math.min(nodeLevel, curMaxLevel) + 1;
@@ -304,7 +305,7 @@ public class HnswGraphBuilder implements HnswBuilder {
    * Find first non-diverse neighbour among the list of neighbors starting from the most distant
    * neighbours
    */
-  private int findWorstNonDiverse(NeighborArray neighbors, int level, RandomVectorScorer scorer) throws IOException {
+  private int findWorstNonDiverse(NeighborArray neighbors, int level, RandomVectorScorer scorer, boolean removeRandom) throws IOException {
     int[] uncheckedIndexes = neighbors.sort(scorer); // what does 'unchecked node' means? What check? What
     int maxCommonConnectionCount = 0;
     int maxcccIndex = -1;
@@ -320,7 +321,7 @@ public class HnswGraphBuilder implements HnswBuilder {
         maxCommonConnectionCount = commonNeighbours.size();
         maxcccIndex = i;
       }
-      if (currNodeNeighbours.size() > maxConnectionCount) {
+      if (currNodeNeighbours.size() >= maxConnectionCount) {
         maxConnectionCount = currNodeNeighbours.size();
         maxConnectionIndex = i;
       }
@@ -336,25 +337,34 @@ public class HnswGraphBuilder implements HnswBuilder {
     } else if (maxConnectionIndex != -1) {
       return maxConnectionIndex;
     } else {
-      return -1;
+      if (removeRandom == false) {
+        return -1;
+      } else {
+        return random.nextInt(neighbors.size());
+      }
     }
   }
 
   public int addAndEnsureConnectedDiversity(int newNode, float newScore, int nodeId, NeighborArray neighbours,
-                                                      int level, int maxConnOnLevel)
+                                                      int level, int maxConnOnLevel, boolean removeRandom)
           throws IOException {
     neighbours.addOutOfOrder(newNode, newScore);
     if (neighbours.size() <= maxConnOnLevel) {
       return -1; // none removed
     }
     RandomVectorScorer scorer = scorerSupplier.scorer(nodeId);
-    int indexToRemove = findWorstNonDiverse(neighbours, level, scorer);
+    int indexToRemove = findWorstNonDiverse(neighbours, level, scorer, removeRandom);
     if (indexToRemove != -1) {
       int nodeRemoved = neighbours.nodes()[indexToRemove];
       neighbours.removeIndex(indexToRemove);
       return nodeRemoved;
+    } else {
+      if (removeRandom == true) {
+        throw new IllegalStateException("If remove random is set we should not have got -1 for remove index.");
+      } else {
+        return -1; // no diverse found hence not removed
+      }
     }
-    return -1; // no diverse found hence not removed
   }
 
   private NeighborArray findCommon(NeighborArray neighbors, NeighborArray currNodeNeighbours) {
@@ -371,7 +381,8 @@ public class HnswGraphBuilder implements HnswBuilder {
   }
 
 
-  private void addDiverseNeighborsNewHeuristic(int level, int incomingNode, NeighborArray candidates, boolean removeOtherHalf)
+  private void addDiverseNeighborsNewHeuristic(int level, int incomingNode, NeighborArray candidates, boolean removeOtherHalf,
+                                               boolean honourMaxConn)
           throws IOException {
     /* For each of the beamWidth nearest candidates (going from best to worst), select it only if it
      * is closer to target than it is to any of the already-selected neighbors (ie selected in this method,
@@ -396,7 +407,7 @@ public class HnswGraphBuilder implements HnswBuilder {
       NeighborArray nbrsOfNbr = hnsw.getNeighbors(level, nbr);
       nbrsOfNbr.rwlock.writeLock().lock();
       try {
-        nodeRemoved = addAndEnsureConnectedDiversity(incomingNode, candidates.scores()[i], nbr, nbrsOfNbr, level, maxConnOnLevel);
+         nodeRemoved = addAndEnsureConnectedDiversity(incomingNode, candidates.scores()[i], nbr, nbrsOfNbr, level, maxConnOnLevel, honourMaxConn);
       } finally {
         nbrsOfNbr.rwlock.writeLock().unlock();
       }
