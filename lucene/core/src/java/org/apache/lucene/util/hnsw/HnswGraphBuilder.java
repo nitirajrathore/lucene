@@ -250,17 +250,18 @@ public class HnswGraphBuilder implements HnswBuilder {
 
       // then do connections from bottom up
       for (int i = 0; i < scratchPerLevel.length; i++) {
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i]); // baseline : similar to false, false, false below.
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false, false); // baseline_equivalent
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false, false); // exp-1 extendCandidates = true
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, false); // exp-2 with keep-pruned =true
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, true); // exp-3 with keep pruned till half max-conn
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, false);
-//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, true);
+        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i]); // baseline : similar to false, false, false below.
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false, false, false); // baseline_equivalent
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, false, false, true); // baseline with remove other half
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, false, false, false); // exp-1 extendCandidates = true
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, false, false); // exp-2 with keep-pruned =true
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], false, true, true, false); // exp-3 with keep pruned till half max-conn
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, false, false);
+//        addDiverseNeighbors(i + lowestUnsetLevel, node, scratchPerLevel[i], true, true, true, false);
 
         // new heuristic
 //        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], false); // new heuristic
-        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], true); // new heuristic
+//        addDiverseNeighborsNewHeuristic(i + lowestUnsetLevel, node, scratchPerLevel[i], true); // new heuristic
       }
       lowestUnsetLevel += scratchPerLevel.length;
       assert lowestUnsetLevel == Math.min(nodeLevel, curMaxLevel) + 1;
@@ -430,7 +431,8 @@ public class HnswGraphBuilder implements HnswBuilder {
 
 
   private void addDiverseNeighbors(int level, int node, NeighborArray candidates,
-                                        boolean extendCandidates, boolean keepPrunedConnections, boolean keepHalfPrunedConnection) throws IOException {
+                                        boolean extendCandidates, boolean keepPrunedConnections,
+                                   boolean keepHalfPrunedConnection, boolean removeOtherHalf) throws IOException {
     NeighborArray neighbors = hnsw.getNeighbors(level, node);
     assert neighbors.size() == 0; // new node
 
@@ -479,6 +481,7 @@ public class HnswGraphBuilder implements HnswBuilder {
     // NOTE: here we're using candidates and mask but not the neighbour array because once we have
     // added incoming link there will be possibilities of this node being discovered and neighbour
     // array being modified. So using local candidates and mask is a safer option.
+    int nodeRemoved = -1;
     for (int i = 0; i < candidates.size(); i++) {
       if (selected[i] == false) {
         continue;
@@ -487,9 +490,13 @@ public class HnswGraphBuilder implements HnswBuilder {
       NeighborArray nbrsOfNbr = hnsw.getNeighbors(level, nbr);
       nbrsOfNbr.rwlock.writeLock().lock();
       try {
-        nbrsOfNbr.addAndEnsureDiversity(node, candidates.scores()[i], nbr, scorerSupplier);
+         nodeRemoved = nbrsOfNbr.addAndEnsureDiversity(node, candidates.scores()[i], nbr, scorerSupplier);
       } finally {
         nbrsOfNbr.rwlock.writeLock().unlock();
+      }
+
+      if (removeOtherHalf && nodeRemoved != -1) {
+        removeOtherHalf(nodeRemoved, nbr, level);
       }
     }
   }

@@ -97,17 +97,21 @@ public class NeighborArray {
    * multiple threads while other add method is only supposed to be called by one thread.
    *
    * @param nodeId node Id of the owner of this NeighbourArray
+   * @return
    */
-  public void addAndEnsureDiversity(
+  public int addAndEnsureDiversity(
       int newNode, float newScore, int nodeId, RandomVectorScorerSupplier scorerSupplier)
       throws IOException {
     addOutOfOrder(newNode, newScore);
     if (size < nodes.length) {
-      return;
+      return -1;
     }
     // we're oversize, need to do diversity check and pop out the least diverse neighbour
-    removeIndex(findWorstNonDiverse(nodeId, scorerSupplier));
+    int indexToRemove = findWorstNonDiverse(nodeId, scorerSupplier);
+    int nodeRemoved = nodes[indexToRemove];
+    removeIndex(indexToRemove);
     assert size == nodes.length - 1;
+    return nodeRemoved;
   }
 
   /**
